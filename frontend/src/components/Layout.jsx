@@ -25,6 +25,8 @@ export default function Layout() {
     navigate('/login');
   };
 
+  const isSousTraitant = user?.role === 'sous_traitant';
+
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     ...(isAdmin
@@ -32,6 +34,11 @@ export default function Layout() {
           { to: '/imports', icon: Upload, label: 'Imports' },
           { to: '/sous-traitants', icon: Users, label: 'Sous-traitants' },
           { to: '/chauffeurs', icon: Truck, label: 'Chauffeurs' },
+        ]
+      : []),
+    ...(isSousTraitant
+      ? [
+          { to: '/chauffeurs', icon: Truck, label: 'Mes Chauffeurs' },
         ]
       : []),
     { to: '/tournees', icon: Package, label: 'Tournées' },
@@ -140,7 +147,9 @@ export default function Layout() {
               <p className="font-medium text-gray-900 truncate">
                 {user?.prenom} {user?.nom}
               </p>
-              <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+              <p className="text-xs text-gray-500 capitalize">
+                {user?.role === 'sous_traitant' ? 'Sous-traitant' : user?.role}
+              </p>
             </div>
           </div>
           <button

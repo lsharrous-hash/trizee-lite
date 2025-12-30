@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDate } from '../context/DateContext';
-import { statsAPI, journeesAPI } from '../services/api';
+import { statsAPI } from '../services/api';
 import {
   Package,
   Truck,
@@ -14,20 +14,33 @@ import {
 } from 'lucide-react';
 
 export default function Dashboard() {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { selectedDate, formatDate } = useDate();
   const [stats, setStats] = useState(null);
+  const [avancement, setAvancement] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const isSousTraitant = user?.role === 'sous_traitant';
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
+      // Stats selon le rôle
       const statsRes = await (isAdmin 
         ? statsAPI.dashboard(selectedDate) 
         : statsAPI.dashboardST(selectedDate));
       setStats(statsRes.data.data);
+
+      // Avancement par chauffeur
+      try {
+        const avancementRes = await statsAPI.avancement(selectedDate);
+        setAvancement(avancementRes.data.data || []);
+      } catch (e) {
+        // Pas grave si l'avancement n'est pas disponible
+        setAvancement([]);
+      }
     } catch (err) {
       console.error('Dashboard error:', err);
       setError('Erreur lors du chargement des données');
@@ -38,6 +51,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
+    // Rafraîchir toutes les 30 secondes
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
   }, [isAdmin, selectedDate]);
 
   if (loading && !stats) {
@@ -75,11 +91,19 @@ export default function Dashboard() {
     red: 'bg-red-100 text-red-600',
   };
 
+  // Calcul du pourcentage global
+  const totalColis = colisStats.total || 0;
+  const colisTries = colisStats.tries || 0;
+  const pourcentageGlobal = totalColis > 0 ? Math.round((colisTries / totalColis) * 100) : 0;
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Dashboard {isSousTraitant && <span className="text-blue-600">- Mon équipe</span>}
+          </h1>
           <p className="text-gray-500">{formatDate(selectedDate)}</p>
         </div>
         <button
@@ -91,6 +115,7 @@ export default function Dashboard() {
         </button>
       </div>
 
+      {/* Stat Cards - Colis */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl p-6 shadow-sm">
@@ -107,6 +132,27 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Progression globale */}
+      {totalColis > 0 && (
+        <div className="bg-white rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold">Progression globale</h2>
+            <span className={`text-2xl font-bold ${pourcentageGlobal >= 100 ? 'text-green-600' : 'text-blue-600'}`}>
+              {pourcentageGlobal}%
+            </span>
+          </div>
+          <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                pourcentageGlobal >= 100 ? 'bg-green-500' : 'bg-blue-500'
+              }`}
+              style={{ width: `${Math.min(pourcentageGlobal, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Stats supplémentaires Admin */}
       {isAdmin && stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl p-6 shadow-sm">
@@ -158,6 +204,89 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Stats Sous-traitant */}
+      {isSousTraitant && stats && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                <Truck className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Mes chauffeurs</p>
+                <p className="text-xl font-bold">{chauffeursStats.total || 0}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                <Package className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Tournées</p>
+                <p className="text-xl font-bold">{stats.tournees || 0}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Progression par chauffeur */}
+      <div className="bg-white rounded-xl shadow-sm">
+        <div className="p-6 border-b border-gray-100">
+          <h2 className="text-lg font-semibold">
+            {isSousTraitant ? 'Progression de mes chauffeurs' : 'Progression par chauffeur'}
+          </h2>
+        </div>
+        <div className="p-6">
+          {avancement.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">
+              Aucune tournée pour cette date
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {avancement.map((item, index) => {
+                const pct = item.pourcentage || 0;
+                return (
+                  <div key={item.chauffeur_id || index} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+                          <Truck className="w-4 h-4 text-gray-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            {item.chauffeur_prenom} {item.chauffeur_nom}
+                          </p>
+                          {!isSousTraitant && item.sous_traitant_nom && (
+                            <p className="text-xs text-gray-500">{item.sous_traitant_nom}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">{item.colis_tries || 0}/{item.total_colis || 0}</p>
+                        <p className="text-xs text-gray-500">{pct}%</p>
+                      </div>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          pct >= 100 ? 'bg-green-500' : 
+                          pct >= 50 ? 'bg-blue-500' : 'bg-orange-500'
+                        }`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

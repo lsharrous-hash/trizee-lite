@@ -160,8 +160,9 @@ const dashboardST = async (req, res) => {
       return res.json({
         success: true,
         data: {
-          colis: { total: 0, tries: 0, restants: 0, pourcentage: 0 },
-          chauffeurs: 0,
+          colis: { total: 0, tries: 0, restants: 0, inconnus: 0, pourcentage: 0 },
+          chauffeurs: { total: 0 },
+          tournees: 0,
         },
       });
     }
@@ -178,8 +179,9 @@ const dashboardST = async (req, res) => {
       return res.json({
         success: true,
         data: {
-          colis: { total: 0, tries: 0, restants: 0, pourcentage: 0 },
-          chauffeurs: 0,
+          colis: { total: 0, tries: 0, restants: 0, inconnus: 0, pourcentage: 0 },
+          chauffeurs: { total: 0 },
+          tournees: 0,
         },
       });
     }
@@ -223,9 +225,13 @@ const dashboardST = async (req, res) => {
           total: totalColis,
           tries: colisTries,
           restants: restants,
+          inconnus: 0,
           pourcentage: pourcentage,
         },
-        chauffeurs: chauffeurIds.length,
+        chauffeurs: {
+          total: chauffeurIds.length,
+        },
+        tournees: tourneeIds.length,
       },
     });
   } catch (error) {
