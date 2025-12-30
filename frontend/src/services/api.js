@@ -142,6 +142,22 @@ export const tourneesAPI = {
   get: (id) => api.get(`/tournees/${id}`),
   export: (id) => api.get(`/tournees/${id}/export`, { responseType: 'blob' }),
   delete: (id) => api.delete(`/tournees/${id}`),
+  createWithSpoke: (chauffeurId, file, date) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('chauffeur_id', chauffeurId);
+    formData.append('date', date);
+    return api.post('/tournees/create-spoke', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importSpoke: (tourneeId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/tournees/${tourneeId}/spoke`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // ============================================

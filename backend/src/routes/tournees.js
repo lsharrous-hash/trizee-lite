@@ -42,6 +42,13 @@ router.get('/:id', auth, roles(['admin', 'sous_traitant']), tourneesController.g
 router.get('/:id/export', auth, roles(['admin', 'sous_traitant']), tourneesController.exportTournee);
 
 /**
+ * @route   POST /tournees/create-spoke
+ * @desc    Créer une tournée manuellement avec un fichier Spoke
+ * @access  Admin uniquement
+ */
+router.post('/create-spoke', auth, roles(['admin']), upload.single('file'), tourneesController.createWithSpoke);
+
+/**
  * @route   POST /tournees/:id/spoke
  * @desc    Importer un fichier Spoke pour une tournée (réimport ST)
  * @access  Admin, Sous-traitant (ses tournées)

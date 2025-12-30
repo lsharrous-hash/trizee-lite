@@ -258,13 +258,259 @@ const exportTournee = async (req, res) => {
 
 /**
  * POST /tournees/:id/spoke
+ * Importer un fichier Spoke pour mettre à jour l'ordre des colis d'une tournée existante
  */
 const importSpoke = async (req, res) => {
-  res.status(501).json({
-    success: false,
-    error: 'NOT_IMPLEMENTED',
-    message: 'Fonctionnalité non implémentée',
-  });
+  try {
+    const { id } = req.params;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_FILE',
+        message: 'Fichier Spoke requis',
+      });
+    }
+
+    // Vérifier que la tournée existe
+    const { data: tournee, error: tourneeError } = await supabaseAdmin
+      .from('tournees')
+      .select('id, journee_id, chauffeur_id')
+      .eq('id', id)
+      .single();
+
+    if (tourneeError || !tournee) {
+      return res.status(404).json({
+        success: false,
+        error: 'NOT_FOUND',
+        message: 'Tournée non trouvée',
+      });
+    }
+
+    // Parser le fichier Spoke PDF
+    const pdfParse = require('pdf-parse');
+    const pdfData = await pdfParse(file.buffer);
+    const text = pdfData.text;
+
+    console.log('PDF Text extracted for tournee', id, ', length:', text.length);
+
+    // Extraire les numéros de tracking et leur ordre
+    const trackingOrders = [];
+    
+    // Pattern pour capturer les trackings dans le format Spoke
+    const trackingPattern = /([A-Z]{2}FR\d{10,20}(?:HD)?);?/gi;
+    
+    let match;
+    let orderNum = 1;
+    
+    while ((match = trackingPattern.exec(text)) !== null) {
+      const tracking = match[1].replace(/;$/, '').trim();
+      trackingOrders.push({ tracking, ordre: orderNum });
+      orderNum++;
+    }
+
+    console.log('Trackings found:', trackingOrders.length);
+
+    // Mettre à jour les colis avec leur ordre
+    let updatedCount = 0;
+    for (const { tracking, ordre } of trackingOrders) {
+      const { data: updated } = await supabaseAdmin
+        .from('colis')
+        .update({ ordre })
+        .eq('tracking', tracking)
+        .eq('tournee_id', id)
+        .select('id');
+
+      if (updated && updated.length > 0) {
+        updatedCount++;
+      }
+    }
+
+    // Marquer la tournée comme ayant un Spoke importé
+    await supabaseAdmin
+      .from('tournees')
+      .update({ spoke_importe: true })
+      .eq('id', id);
+
+    res.json({
+      success: true,
+      data: {
+        tournee_id: id,
+        trackings_trouves: trackingOrders.length,
+        colis_mis_a_jour: updatedCount,
+      },
+    });
+  } catch (error) {
+    console.error('Import spoke error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'SERVER_ERROR',
+      message: 'Erreur lors de l\'import du fichier Spoke',
+    });
+  }
+};
+
+/**
+ * POST /tournees/create-spoke
+ * Créer une tournée manuellement avec un fichier Spoke
+ */
+const createWithSpoke = async (req, res) => {
+  try {
+    const { chauffeur_id, date } = req.body;
+    const file = req.file;
+
+    if (!chauffeur_id || !file || !date) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_FIELDS',
+        message: 'Chauffeur, fichier et date sont requis',
+      });
+    }
+
+    // Vérifier que le chauffeur existe
+    const { data: chauffeur, error: chauffeurError } = await supabaseAdmin
+      .from('chauffeurs')
+      .select('id, nom, prenom, sous_traitant_id')
+      .eq('id', chauffeur_id)
+      .single();
+
+    if (chauffeurError || !chauffeur) {
+      return res.status(404).json({
+        success: false,
+        error: 'CHAUFFEUR_NOT_FOUND',
+        message: 'Chauffeur non trouvé',
+      });
+    }
+
+    // Récupérer ou créer la journée
+    let { data: journee } = await supabaseAdmin
+      .from('journees')
+      .select('id')
+      .eq('date', date)
+      .single();
+
+    if (!journee) {
+      const { data: newJournee, error: journeeError } = await supabaseAdmin
+        .from('journees')
+        .insert({ date, statut: 'en_cours' })
+        .select('id')
+        .single();
+
+      if (journeeError) throw journeeError;
+      journee = newJournee;
+    }
+
+    // Vérifier si une tournée existe déjà pour ce chauffeur à cette date
+    const { data: existingTournee } = await supabaseAdmin
+      .from('tournees')
+      .select('id')
+      .eq('journee_id', journee.id)
+      .eq('chauffeur_id', chauffeur_id)
+      .single();
+
+    let tourneeId;
+
+    if (existingTournee) {
+      // Mettre à jour la tournée existante
+      tourneeId = existingTournee.id;
+      await supabaseAdmin
+        .from('tournees')
+        .update({ spoke_importe: true })
+        .eq('id', tourneeId);
+    } else {
+      // Créer une nouvelle tournée
+      const { data: newTournee, error: tourneeError } = await supabaseAdmin
+        .from('tournees')
+        .insert({
+          journee_id: journee.id,
+          chauffeur_id: chauffeur_id,
+          nb_colis: 0,
+          spoke_importe: true,
+        })
+        .select('id')
+        .single();
+
+      if (tourneeError) throw tourneeError;
+      tourneeId = newTournee.id;
+    }
+
+    // Parser le fichier Spoke PDF
+    const pdfParse = require('pdf-parse');
+    const pdfData = await pdfParse(file.buffer);
+    const text = pdfData.text;
+
+    console.log('PDF Text extracted, length:', text.length);
+
+    // Extraire les numéros de tracking et leur ordre
+    // Format Spoke: chaque ligne contient un numéro d'ordre et un tracking dans Notes
+    // Formats de tracking:
+    // - GFFR + 14 chiffres (Gofo)
+    // - CNFR + chiffres + HD (Cainiao)
+    // - DOFR + chiffres + HD (Autre)
+    const trackingOrders = [];
+    
+    // Pattern pour capturer les trackings dans le format Spoke
+    // Les trackings sont généralement suivis de ; dans la colonne Notes
+    const trackingPattern = /([A-Z]{2}FR\d{10,20}(?:HD)?);?/gi;
+    
+    let match;
+    let orderNum = 1;
+    
+    while ((match = trackingPattern.exec(text)) !== null) {
+      const tracking = match[1].replace(/;$/, '').trim();
+      trackingOrders.push({ tracking, ordre: orderNum });
+      orderNum++;
+    }
+
+    console.log('Trackings found:', trackingOrders.length);
+    if (trackingOrders.length > 0) {
+      console.log('First 5 trackings:', trackingOrders.slice(0, 5));
+    }
+
+    // Mettre à jour les colis avec leur ordre
+    let updatedCount = 0;
+    for (const { tracking, ordre } of trackingOrders) {
+      const { data: updated } = await supabaseAdmin
+        .from('colis')
+        .update({ ordre, tournee_id: tourneeId })
+        .eq('tracking', tracking)
+        .eq('journee_id', journee.id)
+        .select('id');
+
+      if (updated && updated.length > 0) {
+        updatedCount++;
+      }
+    }
+
+    // Mettre à jour le nombre de colis de la tournée
+    const { count: nbColis } = await supabaseAdmin
+      .from('colis')
+      .select('id', { count: 'exact', head: true })
+      .eq('tournee_id', tourneeId);
+
+    await supabaseAdmin
+      .from('tournees')
+      .update({ nb_colis: nbColis || 0 })
+      .eq('id', tourneeId);
+
+    res.json({
+      success: true,
+      data: {
+        tournee_id: tourneeId,
+        chauffeur: `${chauffeur.prenom} ${chauffeur.nom}`,
+        trackings_trouves: trackingOrders.length,
+        colis_mis_a_jour: updatedCount,
+      },
+    });
+  } catch (error) {
+    console.error('Create tournee with spoke error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'SERVER_ERROR',
+      message: 'Erreur lors de la création de la tournée',
+    });
+  }
 };
 
 /**
@@ -332,4 +578,5 @@ module.exports = {
   exportTournee,
   importSpoke,
   remove,
+  createWithSpoke,
 };
