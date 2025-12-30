@@ -141,6 +141,7 @@ export const tourneesAPI = {
   list: (date) => api.get('/tournees', { params: { date } }),
   get: (id) => api.get(`/tournees/${id}`),
   export: (id) => api.get(`/tournees/${id}/export`, { responseType: 'blob' }),
+  delete: (id) => api.delete(`/tournees/${id}`),
 };
 
 // ============================================

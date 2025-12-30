@@ -74,6 +74,29 @@ const list = async (req, res) => {
           .eq('tournee_id', tournee.id)
           .eq('statut', 'trie');
 
+        // Compter les sources (gofo/cainiao)
+        const { data: sourcesColis } = await supabaseAdmin
+          .from('colis')
+          .select('source')
+          .eq('tournee_id', tournee.id);
+
+        const sources = [...new Set((sourcesColis || []).map(c => c.source).filter(Boolean))];
+        const hasGofo = sources.includes('gofo');
+        const hasCainiao = sources.includes('cainiao');
+
+        // Compter par source
+        const { count: nbGofo } = await supabaseAdmin
+          .from('colis')
+          .select('id', { count: 'exact', head: true })
+          .eq('tournee_id', tournee.id)
+          .eq('source', 'gofo');
+
+        const { count: nbCainiao } = await supabaseAdmin
+          .from('colis')
+          .select('id', { count: 'exact', head: true })
+          .eq('tournee_id', tournee.id)
+          .eq('source', 'cainiao');
+
         const pourcentage = tournee.nb_colis > 0
           ? Math.round(((nbTries || 0) / tournee.nb_colis) * 100)
           : 0;
@@ -84,6 +107,12 @@ const list = async (req, res) => {
           sous_traitant: sousTraitant,
           nb_tries: nbTries || 0,
           pourcentage,
+          sources: {
+            gofo: hasGofo,
+            cainiao: hasCainiao,
+            nb_gofo: nbGofo || 0,
+            nb_cainiao: nbCainiao || 0,
+          },
         };
       })
     );
@@ -238,9 +267,69 @@ const importSpoke = async (req, res) => {
   });
 };
 
+/**
+ * DELETE /tournees/:id
+ * Supprimer une tournée et ses colis
+ */
+const remove = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Vérifier que la tournée existe
+    const { data: tournee, error: fetchError } = await supabaseAdmin
+      .from('tournees')
+      .select('id, chauffeur_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !tournee) {
+      return res.status(404).json({
+        success: false,
+        error: 'NOT_FOUND',
+        message: 'Tournée non trouvée',
+      });
+    }
+
+    // Supprimer d'abord les colis de cette tournée
+    const { error: colisError } = await supabaseAdmin
+      .from('colis')
+      .delete()
+      .eq('tournee_id', id);
+
+    if (colisError) {
+      console.error('Error deleting colis:', colisError);
+      throw colisError;
+    }
+
+    // Supprimer la tournée
+    const { error: tourneeError } = await supabaseAdmin
+      .from('tournees')
+      .delete()
+      .eq('id', id);
+
+    if (tourneeError) {
+      console.error('Error deleting tournee:', tourneeError);
+      throw tourneeError;
+    }
+
+    res.json({
+      success: true,
+      message: 'Tournée supprimée avec succès',
+    });
+  } catch (error) {
+    console.error('Delete tournee error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'SERVER_ERROR',
+      message: 'Erreur lors de la suppression de la tournée',
+    });
+  }
+};
+
 module.exports = {
   list,
   get,
   exportTournee,
   importSpoke,
+  remove,
 };

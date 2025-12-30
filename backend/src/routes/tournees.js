@@ -48,4 +48,11 @@ router.get('/:id/export', auth, roles(['admin', 'sous_traitant']), tourneesContr
  */
 router.post('/:id/spoke', auth, roles(['admin', 'sous_traitant']), upload.single('file'), tourneesController.importSpoke);
 
+/**
+ * @route   DELETE /tournees/:id
+ * @desc    Supprimer une tournée et ses colis
+ * @access  Admin uniquement
+ */
+router.delete('/:id', auth, roles(['admin']), tourneesController.remove);
+
 module.exports = router;
